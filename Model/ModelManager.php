@@ -12,6 +12,7 @@
 namespace Sonata\DoctrineORMAdminBundle\Model;
 
 use Sonata\DoctrineORMAdminBundle\Admin\FieldDescription;
+use Sonata\DoctrineORMAdminBundle\Datagrid\ProxyQuery;
 
 use Sonata\AdminBundle\Model\ModelManagerInterface;
 use Sonata\AdminBundle\Admin\FieldDescriptionInterface;
@@ -19,35 +20,35 @@ use Sonata\AdminBundle\Datagrid\DatagridInterface;
 use Sonata\AdminBundle\Datagrid\ProxyQueryInterface;
 use Sonata\AdminBundle\Exception\ModelManagerException;
 
-use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\QueryBuilder;
 
 use Symfony\Component\Form\Exception\PropertyAccessDeniedException;
-use Sonata\DoctrineORMAdminBundle\Datagrid\ProxyQuery;
+
+use Symfony\Bridge\Doctrine\RegistryInterface;
+
+use Exporter\Source\DoctrineORMQuerySourceIterator;
 
 class ModelManager implements ModelManagerInterface
 {
-    protected $entityManager;
+    protected $registry;
 
     /**
-     *
-     * @param \Doctrine\ORM\EntityManager $entityManager
+     * @param \Symfony\Bridge\Doctrine\RegistryInterface $registry
      */
-    public function __construct(EntityManager $entityManager)
+    public function __construct(RegistryInterface $registry)
     {
-        $this->entityManager = $entityManager;
+        $this->registry = $registry;
     }
 
     /**
      * Returns the related model's metadata
      *
-     * @abstract
-     * @param string $name
-     * @return \Doctrine\ORM\Mapping\ClassMetadataInfo
+     * @param $class
+     * @return \Doctrine\ORM\Mapping\ClassMetadata
      */
     public function getMetadata($class)
     {
-        return $this->entityManager->getMetadataFactory()->getMetadataFor($class);
+        return $this->getEntityManager($class)->getMetadataFactory()->getMetadataFor($class);
     }
 
     /**
@@ -58,7 +59,7 @@ class ModelManager implements ModelManagerInterface
      */
     public function hasMetadata($class)
     {
-        return $this->entityManager->getMetadataFactory()->hasMetadataFor($class);
+        return $this->getEntityManager($class)->getMetadataFactory()->hasMetadataFor($class);
     }
 
     /**
@@ -96,8 +97,9 @@ class ModelManager implements ModelManagerInterface
     public function create($object)
     {
         try {
-            $this->entityManager->persist($object);
-            $this->entityManager->flush();
+            $entityManager = $this->getEntityManager($object);
+            $entityManager->persist($object);
+            $entityManager->flush();
         } catch ( \PDOException $e ) {
             throw new ModelManagerException('', 0, $e);
         }
@@ -106,8 +108,9 @@ class ModelManager implements ModelManagerInterface
     public function update($object)
     {
         try {
-            $this->entityManager->persist($object);
-            $this->entityManager->flush();
+            $entityManager = $this->getEntityManager($object);
+            $entityManager->persist($object);
+            $entityManager->flush();
         } catch ( \PDOException $e ) {
             throw new ModelManagerException('', 0, $e);
         }
@@ -116,8 +119,9 @@ class ModelManager implements ModelManagerInterface
     public function delete($object)
     {
         try {
-            $this->entityManager->remove($object);
-            $this->entityManager->flush();
+            $entityManager = $this->getEntityManager($object);
+            $entityManager->remove($object);
+            $entityManager->flush();
         } catch ( \PDOException $e ) {
             throw new ModelManagerException('', 0, $e);
         }
@@ -133,7 +137,7 @@ class ModelManager implements ModelManagerInterface
     public function find($class, $id)
     {
         $values = array_combine($this->getIdentifierFieldNames($class), explode('-', $id));
-        return $this->entityManager->getRepository($class)->find($values);
+        return $this->getEntityManager($class)->getRepository($class)->find($values);
     }
 
     /**
@@ -143,7 +147,7 @@ class ModelManager implements ModelManagerInterface
      */
     public function findBy($class, array $criteria = array())
     {
-        return $this->entityManager->getRepository($class)->findBy($criteria);
+        return $this->getEntityManager($class)->getRepository($class)->findBy($criteria);
     }
 
     /**
@@ -153,15 +157,19 @@ class ModelManager implements ModelManagerInterface
      */
     public function findOneBy($class, array $criteria = array())
     {
-        return $this->entityManager->getRepository($class)->findOneBy($criteria);
+        return $this->getEntityManager($class)->getRepository($class)->findOneBy($criteria);
     }
 
     /**
      * @return \Doctrine\ORM\EntityManager
      */
-    public function getEntityManager()
+    public function getEntityManager($class)
     {
-        return $this->entityManager;
+        if (is_object($class)) {
+            $class = get_class($class);
+        }
+
+        return $this->registry->getEntityManagerForClass($class);
     }
 
     /**
@@ -191,7 +199,7 @@ class ModelManager implements ModelManagerInterface
      */
     public function createQuery($class, $alias = 'o')
     {
-        $repository = $this->getEntityManager()->getRepository($class);
+        $repository = $this->getEntityManager($class)->getRepository($class);
 
         return new ProxyQuery($repository->createQueryBuilder($alias));
     }
@@ -221,15 +229,16 @@ class ModelManager implements ModelManagerInterface
     /**
      * @throws \RuntimeException
      * @param $entity
-     * @return
+     * @return mixed
      */
     public function getIdentifierValues($entity)
     {
-        if (!$this->getEntityManager()->getUnitOfWork()->isInIdentityMap($entity)) {
+        $entityManager = $this->getEntityManager($entity);
+        if (!$entityManager->getUnitOfWork()->isInIdentityMap($entity)) {
             throw new \RuntimeException('Entities passed to the choice field must be managed');
         }
 
-        return $this->getEntityManager()->getUnitOfWork()->getEntityIdentifier($entity);
+        return $entityManager->getUnitOfWork()->getEntityIdentifier($entity);
     }
 
     /**
@@ -253,7 +262,7 @@ class ModelManager implements ModelManagerInterface
         }
 
         // the entities is not managed
-        if (!$entity || !$this->getEntityManager()->getUnitOfWork()->isInIdentityMap($entity)) {
+        if (!$entity || !$this->getEntityManager($entity)->getUnitOfWork()->isInIdentityMap($entity)) {
             return null;
         }
 
@@ -300,22 +309,56 @@ class ModelManager implements ModelManagerInterface
      */
     public function batchDelete($class, ProxyQueryInterface $queryProxy)
     {
+        $queryProxy->select('DISTINCT '.$queryProxy->getRootAlias());
+
         try {
+            $entityManager = $this->getEntityManager($class);
+
             $i = 0;
             foreach ($queryProxy->getQuery()->iterate() as $pos => $object) {
-                $this->entityManager->remove($object[0]);
+                $entityManager->remove($object[0]);
 
                 if ((++$i % 20) == 0) {
-                    $this->entityManager->flush();
-                    $this->entityManager->clear();
+                    $entityManager->flush();
+                    $entityManager->clear();
                 }
             }
 
-            $this->entityManager->flush();
-            $this->entityManager->clear();
+            $entityManager->flush();
+            $entityManager->clear();
         } catch ( \PDOException $e ) {
             throw new ModelManagerException('', 0, $e);
         }
+    }
+
+    /**
+     * @param \Sonata\AdminBundle\Datagrid\DatagridInterface $datagrid
+     * @param array $fields
+     * @param null $firstResult
+     * @param null $maxResult
+     * @return \Exporter\Source\DoctrineORMQuerySourceIterator
+     */
+    public function getDataSourceIterator(DatagridInterface $datagrid, array $fields, $firstResult = null, $maxResult = null)
+    {
+        $datagrid->buildPager();
+        $query = $datagrid->getQuery();
+
+        $query->select('DISTINCT '.$query->getRootAlias());
+        $query->setFirstResult($firstResult);
+        $query->setMaxResults($maxResult);
+
+        return new DoctrineORMQuerySourceIterator($query instanceof ProxyQuery ? $query->getQuery() : $query, $fields);
+    }
+
+    /**
+     * @param $class
+     * @return array
+     */
+    public function getExportFields($class)
+    {
+        $metadata = $this->registry->getEntityManager()->getClassMetadata($class);
+
+        return $metadata->getFieldNames();
     }
 
     /**

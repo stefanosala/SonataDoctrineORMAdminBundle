@@ -4,7 +4,7 @@ Filter Field Definition
 These fields are displayed inside the filter box. They allow you to filter
 the list of entities by a number of different methods.
 
-A filter instance is always linked to a Form Type, there is 3 types availables :
+A filter instance is always linked to a Form Type, there are 3 types available :
 
   - sonata_type_filter_number  :  display 2 widgets, the operator ( >, >=, <= , <, =) and the value
   - sonata_type_filter_choice  :  display 2 widgets, the operator (yes and no) and the value
@@ -22,17 +22,17 @@ The ``add`` method accepts 4 arguments :
   - the field type      : the type of widget used to render the value part
   - the field options   : the type options
 
-Type available
----------------
+Filter types available
+----------------------
 
 For now, only Doctrine ORM filters are available
 
-  - doctrine_orm_boolean   : depends on the ``sonata_type_filter_default`` Form Type, render yes or no field
+  - doctrine_orm_boolean   : depends on the ``sonata_type_filter_default`` Form Type, renders yes or no field
   - doctrine_orm_callback  : depends on the ``sonata_type_filter_default`` Form Type, types can be configured as needed
-  - doctrine_orm_choice    : depends on the ``sonata_type_filter_choice`` Form Type, render yes or no field
+  - doctrine_orm_choice    : depends on the ``sonata_type_filter_choice`` Form Type, renders yes or no field
   - doctrine_orm_model     : depends on the ``sonata_type_filter_number`` Form Type
   - doctrine_orm_string    : depends on the ``sonata_type_filter_choice``
-  - doctrine_orm_number    : depends on the ``sonata_type_filter_choice`` Form Type, render yes or no field
+  - doctrine_orm_number    : depends on the ``sonata_type_filter_choice`` Form Type, renders yes or no field
 
 
 Example
@@ -88,9 +88,10 @@ Callback
 ^^^^^^^^
 
 To create a custom callback filter, two methods need to be implemented; one to
-define the field type and one to define how to use the field's value. In this
-example, ``getWithOpenCommentField`` and ``getWithOpenCommentFilter`` implement
-this functionality.
+define the field type and one to define how to use the field's value. The
+latter shall return wether the filter actually is applied to the queryBuilder
+or not. In this example, ``getWithOpenCommentField`` and ``getWithOpenCommentFilter``
+implement this functionality.
 
 .. code-block:: php
 
@@ -124,6 +125,8 @@ this functionality.
                         $queryBuilder->leftJoin(sprintf('%s.comments', $alias), 'c');
                         $queryBuilder->andWhere('c.status = :status');
                         $queryBuilder->setParameter('status', Comment::STATUS_MODERATE);
+
+                        return true;
                     },
                     'field_type' => 'checkbox'
                 ))
@@ -139,5 +142,7 @@ this functionality.
             $queryBuilder->leftJoin(sprintf('%s.comments', $alias), 'c');
             $queryBuilder->andWhere('c.status = :status');
             $queryBuilder->setParameter('status', Comment::STATUS_MODERATE);
+
+            return true;
         }
     }

@@ -15,6 +15,8 @@ use Sonata\AdminBundle\Filter\Filter as BaseFilter;
 
 abstract class Filter extends BaseFilter
 {
+    protected $active = false;
+
     public function apply($queryBuilder, $value)
     {
         $this->value = $value;
@@ -26,7 +28,7 @@ abstract class Filter extends BaseFilter
 
     protected function association($queryBuilder, $value)
     {
-        return array($queryBuilder->getRootAlias(), $this->getFieldName());
+        return array($this->getOption('alias', $queryBuilder->getRootAlias()), $this->getFieldName());
     }
 
     protected function applyWhere($queryBuilder, $parameter)
@@ -36,5 +38,13 @@ abstract class Filter extends BaseFilter
         } else {
             $queryBuilder->andWhere($parameter);
         }
+
+        // filter is active since it's added to the queryBuilder
+        $this->active = true;
+    }
+
+    public function isActive()
+    {
+        return $this->active;
     }
 }
